@@ -1,0 +1,315 @@
+---
+title: "Trends in the number of observed feeding events"
+author: "Mellina Sidous"
+date: "2025-06-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#load packages
+#----------------
+library(DHARMa)
+library(ggplot2)
+library(gam)
+library(tidyverse)
+library(writexl)
+library(MASS)
+
+
+
+#load data
+#----------------
+load("data/dat_nfeeding.RData")
+```
+
+#### Visualize data to dig into the distribution
+```{r}
+#Histogram
+#----------------
+count_bar <-table(kill_dt$count)  %>% as.data.frame() %>% rename("Count"=Var1) %>% 
+  ggplot( aes(x=Count, y=Freq))+
+  geom_bar(stat="identity", width=1, color="black", fill="grey")+
+  theme_classic(base_size=18)+
+  labs(x="Number of kills observed", y="Occurence")
+count_bar
+#'
+#'
+# Percent of 0s
+#----------------
+sum(kill_dt$count==0, na.rm = TRUE)/nrow(kill_dt) 
+#'
+# Distribution
+#----------------
+mean(kill_dt$count, na.rm = TRUE)
+var(kill_dt$count, na.rm = TRUE) 
+```
+
+
+#### Fit of a classical poisson glm vs. negative binomial: 
+
+```{r}
+# Poisson GLM
+#----------------
+cst.poiss.glm <-glm(count~ factor(Month) * Year * Clan + offset(log(n_visits)), family=poisson,data=kill_dt)
+
+# Goodness of fit
+plot(cst.poiss.glm) 
+testDispersion(cst.poiss.glm) 
+
+#Negative binomial
+#----------------
+cst.nb.glm <-glm.nb(count~ factor(Month) * Year * Clan + offset(log(n_visits)),data=kill_dt)
+
+# Goodness of fit
+plot(cst.nb.glm) 
+testDispersion(cst.nb.glm)
+
+
+
+```
+
+### Annual pattern of the number of observed feeding events
+
+
+```{r}
+# Constant model
+cst.glm <-glm.nb(count~1+ offset(log(n_visits)),data=kill_dt)
+clan.glm <-glm.nb(count~Clan+ offset(log(n_visits)),data=kill_dt)
+
+####### Effect of month without clan effect
+#________________________________________________
+cmonth <- glm.nb(count~ factor(Month) + offset(log(n_visits)),link=log, data=kill_dt)#Month categorical 
+smonth <- gam(count~ s(Month) + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)#Month non linear
+qmonth <- glm.nb(count~( Month+ I(Month^2)) + offset(log(n_visits)), data=kill_dt)#Month quadratic
+
+   
+##### Month with clan additive
+#________________________________________________
+# Month categorical + clan
+cmonth.clan <- MASS::glm.nb(formula= count~ factor(Month) + Clan +offset(log(n_visits)),link=log, data=kill_dt)
+# Month nonlinear + clan
+smonth.clan <- gam(count~ s(Month) +Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt) 
+# Month quadratic + clan
+qmonth.clan <- glm.nb(count~( Month+ I(Month^2))+ Clan + offset(log(n_visits)), data=kill_dt)
+
+##### Month with clan interation
+#________________________________________________
+# Month categorical * clan
+cmonth.iclan <- MASS::glm.nb(formula= count~ factor(Month) * Clan +offset(log(n_visits)),link=log, data=kill_dt)
+# Month nonlinear * clan
+smonth.iclan <- gam(count~ s(Month) *Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt) 
+# Month quadratic * clan
+qmonth.iclan <- glm.nb(count~( Month+ I(Month^2))* Clan + offset(log(n_visits)), data=kill_dt)
+
+####Table of results 
+#________________________________________________
+
+Model_selection_month <- tibble(
+  model= c("constant","Clan", "cMonth", "sMonth","qMonth" , "cMonth+Clan", "sMonth+Clan","qMonth+Clan", "cMonth*Clan", "sMonth*Clan","qMonth*Clan" ),
+  
+  AIC= c(AIC(cst.glm),AIC(clan.glm),  AIC(cmonth), AIC(smonth), AIC(qmonth), AIC(cmonth.clan), AIC(smonth.clan), AIC(qmonth.clan), AIC(cmonth.iclan), AIC(smonth.iclan), AIC(qmonth.iclan)), 
+  
+  R2 = c(0, 
+          (100-clan.glm$deviance/clan.glm$null.deviance * 100),
+         (100-cmonth$deviance/cmonth$null.deviance * 100), (100-smonth$deviance/smonth$null.deviance * 100), (100-qmonth$deviance/qmonth$null.deviance * 100), (100-cmonth.clan$deviance/cmonth.clan$null.deviance * 100),
+              (100-smonth.clan$deviance/smonth.clan$null.deviance * 100),
+               (100-qmonth.clan$deviance/qmonth.clan$null.deviance * 100),
+    (100-cmonth.iclan$deviance/cmonth.iclan$null.deviance * 100),
+              (100-smonth.iclan$deviance/smonth.iclan$null.deviance * 100),
+               (100-qmonth.iclan$deviance/qmonth.iclan$null.deviance * 100)))
+
+```
+
+### How annual patterns have changed - Additive effect of Year 
+
+```{r message=FALSE} 
+#### Month + Year no clan effect
+#________________________________________________
+# Year linear
+smonth.year <- gam(count~( s(Month) + Year) + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.syear <- gam(count~( s(Month) + s(Year)) + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.qyear <- gam(count~(s(Month) +(Year+ I(Year^2)))+ offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.cyear <- gam(count~ s(Month) + factor(Year)  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year as a random effect
+smonth.ryear <- gam(count~( s(Month) + random(factor(Year))) + offset(log(n_visits)),family=neg.bin(1) ,  data=kill_dt)
+
+
+#### Month + Year + clan additive
+#________________________________________________
+# Year linear
+smonth.year.clan <- gam(count~( s(Month) + Year)+ Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.syear.clan <- gam(count~( s(Month) + s(Year))+Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.qyear.clan <- gam(count~(s(Month) +(Year+ I(Year^2)))+Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.cyear.clan <- gam(count~ s(Month) + factor(Year) +Clan  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year as a random effect
+smonth.ryear.clan <- gam(count~( s(Month) + random(factor(Year)))+Clan + offset(log(n_visits)),family=neg.bin(1) ,  data=kill_dt)
+
+
+#### Month + Year + clan interacting
+#________________________________________________
+# Year linear
+smonth.year.iclan <- gam(count~( s(Month) + Year)* Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.syear.iclan <- gam(count~( s(Month) + s(Year))*Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.qyear.iclan <- gam(count~(s(Month) +(Year+ I(Year^2)))*Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.cyear.iclan <- gam(count~ s(Month) + factor(Year) *Clan  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year as a random effect
+smonth.ryear.iclan <- gam(count~( s(Month) + random(factor(Year)))*Clan + offset(log(n_visits)),family=neg.bin(1) ,  data=kill_dt)
+
+
+####Table of results 
+#________________________________________________
+
+Model_selection_Year_add <- tibble(
+  
+  model= c("sMonth+Year", "sMonth+sYear","sMonth+qYear", "sMonth+cYear","sMonth+rYear" ,
+    "sMonth+Year+Clan", "sMonth+sYear+Clan","sMonth+qYear+Clan", "sMonth+cYear+Clan","sMonth+rYear+Clan" , 
+    "sMonth+Year*Clan", "sMonth+sYear*Clan","sMonth+qYear*Clan", "sMonth+cYear*Clan","sMonth+rYear*Clan"  ),
+       AIC=c(
+         AIC(smonth.year), AIC(smonth.syear),AIC(smonth.qyear), AIC(smonth.cyear), AIC(smonth.ryear),
+         AIC(smonth.year.clan), AIC(smonth.syear.clan),AIC(smonth.qyear.clan), AIC(smonth.cyear.clan) ,AIC(smonth.ryear.clan),
+         AIC(smonth.year.iclan), AIC(smonth.syear.iclan),AIC(smonth.qyear.iclan), AIC(smonth.cyear.iclan), AIC(smonth.ryear.iclan) ),
+       
+              R2 = c(
+                (100-smonth.year$deviance/smonth.year$null.deviance * 100),
+              (100-smonth.syear$deviance/smonth.syear$null.deviance * 100),
+               (100-smonth.qyear$deviance/smonth.qyear$null.deviance * 100),
+              (100-smonth.cyear$deviance/smonth.cyear$null.deviance * 100), 
+              (100-smonth.ryear$deviance/smonth.ryear$null.deviance * 100),
+                
+                (100-smonth.year.clan$deviance/smonth.year.clan$null.deviance * 100),
+              (100-smonth.syear.clan$deviance/smonth.syear.clan$null.deviance * 100),
+               (100-smonth.qyear.clan$deviance/smonth.qyear.clan$null.deviance * 100),
+              (100-smonth.cyear.clan$deviance/smonth.cyear.clan$null.deviance * 100), 
+              (100-smonth.ryear.clan$deviance/smonth.ryear.clan$null.deviance * 100),
+                
+                (100-smonth.year.iclan$deviance/smonth.year.iclan$null.deviance * 100),
+              (100-smonth.syear.iclan$deviance/smonth.syear.iclan$null.deviance * 100),
+               (100-smonth.qyear.iclan$deviance/smonth.qyear.iclan$null.deviance * 100),
+              (100-smonth.cyear.iclan$deviance/smonth.cyear.iclan$null.deviance * 100), 
+              (100-smonth.ryear.iclan$deviance/smonth.ryear.iclan$null.deviance * 100)))
+
+
+```
+
+### How annual patterns have changed - Interacting effect of Year 
+```{r message=FALSE} 
+#### Month * Year no clan effect
+#________________________________________________
+# Year linear
+smonth.iyear <- gam(count~ s(Month) * Year + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.isyear <- gam(count~ s(Month) * s(Year) + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.iqyear <- gam(count~(s(Month) *(Year+ I(Year^2)))+ offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.icyear <- gam(count~ s(Month) * factor(Year)  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+
+#### Month * Year + clan 
+#________________________________________________
+# Year linear
+smonth.iyear.clan <- gam(count~( s(Month) * Year)+ Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.isyear.clan <- gam(count~( s(Month) * s(Year))+Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.iqyear.clan <- gam(count~(s(Month) *(Year+ I(Year^2)))+Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.icyear.clan <- gam(count~ s(Month) * factor(Year) +Clan  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+
+
+#### Month * Year * clan
+#________________________________________________
+# Year linear
+smonth.iyear.iclan <- gam(count~( s(Month) * Year)* Clan + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+#Year non linear
+smonth.isyear.iclan <- gam(count~( s(Month) * s(Year))*Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year quadratic
+smonth.iqyear.iclan <- gam(count~(s(Month) *(Year+ I(Year^2)))*Clan + offset(log(n_visits)), family=neg.bin(1),  data=kill_dt)
+#Year categorical
+smonth.icyear.iclan <- gam(count~ s(Month) * factor(Year) *Clan  + offset(log(n_visits)),family=neg.bin(1),  data=kill_dt)
+
+
+####Table of results 
+#________________________________________________
+
+
+Model_selection_Year_int <- tibble(
+  
+  model= c("sMonth*Year", "sMonth*sYear","sMonth*qYear", "sMonth*cYear"  ,
+    "sMonth*Year+Clan", "sMonth*sYear+Clan","sMonth*qYear+Clan", "sMonth*cYear+Clan" ,
+    "sMonth*Year*Clan", "sMonth*sYear*Clan","sMonth*qYear*Clan", "sMonth*cYear*Clan" ),
+       AIC=c(
+         AIC(smonth.iyear), AIC(smonth.isyear),AIC(smonth.iqyear), AIC(smonth.icyear),
+         AIC(smonth.iyear.clan), AIC(smonth.isyear.clan),AIC(smonth.iqyear.clan), AIC(smonth.icyear.clan) ,
+         AIC(smonth.iyear.iclan), AIC(smonth.isyear.iclan),AIC(smonth.iqyear.iclan), AIC(smonth.icyear.iclan) ),
+       
+              R2 = c((100-smonth.iyear$deviance/smonth.iyear$null.deviance * 100),
+              (100-smonth.isyear$deviance/smonth.isyear$null.deviance * 100),
+               (100-smonth.iqyear$deviance/smonth.iqyear$null.deviance * 100),
+              (100-smonth.icyear$deviance/smonth.icyear$null.deviance * 100),
+                
+               (100-smonth.iyear.clan$deviance/smonth.iyear.clan$null.deviance * 100),
+              (100-smonth.isyear.clan$deviance/smonth.isyear.clan$null.deviance * 100),
+               (100-smonth.iqyear.clan$deviance/smonth.iqyear.clan$null.deviance * 100),
+              (100-smonth.icyear.clan$deviance/smonth.icyear.clan$null.deviance * 100),
+                
+               (100-smonth.iyear.iclan$deviance/smonth.iyear.iclan$null.deviance * 100),
+              (100-smonth.isyear.iclan$deviance/smonth.isyear.iclan$null.deviance * 100),
+               (100-smonth.iqyear.iclan$deviance/smonth.iqyear.iclan$null.deviance * 100),
+              (100-smonth.icyear.iclan$deviance/smonth.icyear.iclan$null.deviance * 100)))
+
+
+```
+
+### Prey
+
+```{r}
+#### Prey Mode
+prey.mode <- glm.nb(count~ mth_prey_mode + offset(log(n_visits)), data=kill_dt)
+prey.mode.clan <- glm.nb(count~ mth_prey_mode + Clan + offset(log(n_visits)), data=kill_dt)
+prey.mode.iclan <- glm.nb(count~ mth_prey_mode * Clan + offset(log(n_visits)), data=kill_dt)
+
+### Prey Max
+prey.max <- glm.nb(count~ mth_prey_max  + offset(log(n_visits)), data=kill_dt)
+prey.max.clan <- glm.nb(count~ mth_prey_max + Clan  + offset(log(n_visits)), data=kill_dt)
+prey.max.iclan <- glm.nb(count~ mth_prey_max * Clan  + offset(log(n_visits)), data=kill_dt)
+
+## Table of results
+Model_selection_Prey<- tibble(model= c("Preymode", "Preymode+Clan","Preymode*Clan", "Preymax", "Preymax+Clan", "Preymax*Clan" ), AIC=c(AIC(prey.mode), AIC(prey.mode.clan),AIC(prey.mode.iclan), AIC(prey.max), AIC(prey.max.clan), AIC(prey.max.iclan)) , 
+       
+       R2 = c((100-prey.mode$deviance/prey.mode$null.deviance * 100),
+              (100-prey.mode.clan$deviance/prey.mode.clan$null.deviance * 100),
+               (100-prey.mode.iclan$deviance/prey.mode.iclan$null.deviance * 100),
+              (100-prey.max$deviance/prey.max$null.deviance * 100),
+              (100-prey.max.clan$deviance/prey.max.clan$null.deviance * 100),
+              (100-prey.max.iclan$deviance/prey.max.iclan$null.deviance * 100)))
+
+
+
+```
+
+
+
+##Final model selection
+
+```{r}
+Final_model_sel <- rbind(Model_selection_Year_int ,Model_selection_Year_add,Model_selection_month, Model_selection_Prey)%>%
+    arrange(AIC)
+
+View(Final_model_sel)
+
+```
+
+Save model selection
+
+```{r}
+write_xlsx(Final_model_sel, path = "Results/Model_selection_nfeeding.xlsx")
+```

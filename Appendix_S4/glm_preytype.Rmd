@@ -1,0 +1,329 @@
+---
+title: "prey_glm_latest"
+author: "Mellina Sidous"
+date: "2025-06-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#load packages
+library(DHARMa)
+library(ggplot2)
+library(gam)
+library(tidyverse)
+library(writexl)
+
+
+
+
+#load data
+load("Prey_data.RData")
+
+# add prey indices 
+load("dat_nfeeding.RData")
+
+prey_presence <- kill_dt %>% dplyr::select(Month, Year,Clan, mth_prey_max, mth_prey_mode) %>% 
+  group_by(Month, Year, Clan) %>%
+  slice(1)%>%
+  ungroup()
+
+kills <- left_join(kill, prey_presence, by = c("Year", "Month", "Clan")) 
+kill <- kills[-which(is.na(kills$mth_prey_max)),]
+
+
+```
+
+## Visualize data
+
+```{r cars}
+# type of prey observed 
+table(kill$Prey)
+table(kill$migratory)
+table(kill$Clan)
+kill_mi <- kill %>% subset(Prey=="TG")
+table(kill_mi$Clan)
+
+#visualize prop over month 
+tibble(prop=as.numeric(tapply(kill$migratory, kill$Month, mean)), month=1:12) %>% ggplot(aes(x=month, y=prop))+
+  geom_smooth()+
+    geom_point()+
+  theme_classic(base_size = 18)
+
+#visualize prop over years 
+tibble(prop=as.numeric(tapply(kill$migratory, kill$Year, mean)), year=1990:2019) %>% ggplot(aes(x=year, y=prop))+
+  geom_smooth()+
+    geom_point()+
+  theme_classic(base_size = 18)
+
+
+```
+
+Test a first model 
+
+```{r}
+prey_cst <- glm(migratory~ 1, family=binomial,data=kill)
+AIC(prey_cst) # 684.8284
+testOverdispersion(prey_cst)
+
+
+```
+## Temporal patterns of Prey_type
+
+
+### The effect of month
+
+```{r}
+#Effect of clan only
+prey_clan <- glm(migratory~ Clan, family=binomial,data=kill)
+
+####### Effect of month without clan effect
+#________________________________________________
+prey_cmonth<- glm(migratory~ factor(Month), family=binomial,data=kill)# Month Categorical 
+prey_month<-gam(migratory~ s(Month), family=binomial,data=kill) #Month non linear
+prey_qmonth<- glm(migratory~  (Month + I(Month^2)), family=binomial,data=kill)# Month quadratic 
+
+                                                                                         
+    
+##### Month with clan additive
+#________________________________________________
+# Month categorical + clan
+prey_cmonth_clan<- glm(migratory~ factor(Month)+ Clan, family=binomial,data=kill) 
+# Month nonlinear + clan
+prey_month_clan<-gam(migratory~ s(Month)+ Clan, family=binomial,data=kill) 
+# Month quadratic + clan
+prey_qmonth_clan<- glm(migratory~  (Month + I(Month^2))+ Clan, family=binomial,data=kill) 
+
+
+
+#### Month with clan interacting
+#________________________________________________
+prey_cmonth_iclan<- glm(migratory~ factor(Month)* Clan, family=binomial,data=kill)# Month categorical
+prey_month_iclan<-gam(migratory~ s(Month)* Clan, family=binomial,data=kill)# Month nonlinear 
+prey_qmonth_iclan<- glm(migratory~  (Month + I(Month^2))* Clan, family=binomial,data=kill)#Month quad
+
+
+####Table of results 
+#________________________________________________
+
+Model_selection_month <- tibble(
+  model= c("Constant", "Clan", "cMonth", "sMonth","qMonth" , "cMonth+Clan", "sMonth+Clan","qMonth+Clan", "cMonth*Clan", "sMonth*Clan","qMonth*Clan" ),
+  
+  AIC= c(AIC(prey_cst), AIC(prey_clan), AIC(prey_cmonth), AIC(prey_month), AIC(prey_qmonth), AIC(prey_cmonth_clan), AIC(prey_month_clan), AIC(prey_qmonth_clan), AIC(prey_cmonth_iclan), AIC(prey_month_iclan), AIC(prey_qmonth_iclan)), 
+  
+  R2 = c((100-prey_cst$deviance/prey_cst$null.deviance * 100),
+(100-prey_clan$deviance/prey_clan$null.deviance * 100),
+(100-prey_cmonth$deviance/prey_cmonth$null.deviance * 100), (100-prey_month$deviance/prey_month$null.deviance * 100), (100-prey_qmonth$deviance/prey_qmonth$null.deviance * 100), (100-prey_cmonth_clan$deviance/prey_cmonth_clan$null.deviance * 100),
+              (100-prey_month_clan$deviance/prey_month_clan$null.deviance * 100),
+               (100-prey_qmonth_clan$deviance/prey_qmonth_clan$null.deviance * 100),
+    (100-prey_cmonth_iclan$deviance/prey_cmonth_iclan$null.deviance * 100),
+              (100-prey_month_iclan$deviance/prey_month_iclan$null.deviance * 100),
+               (100-prey_qmonth_iclan$deviance/prey_qmonth_iclan$null.deviance * 100)))
+```
+
+### How annual patterns have changed - Additive effect of Year 
+
+```{r}
+#### Month + Year no clan effect
+#________________________________________________
+#Year linear
+prey_month_year <- gam(migratory~ s(Month) + Year, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_syear<- gam(migratory~ (s(Month)+ s(Year)), family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_qyear <- gam(migratory~ (s(Month) +(Year+ I(Year)^2)), family=binomial,data=kill)
+## Year categorical
+prey_smonth_cyear <- gam(migratory~ (s(Month) + factor(Year)), family=binomial,data=kill)
+
+
+
+#### Month + Year + clan
+#________________________________________________
+#Year linear
+prey_month_year_clan <- gam(migratory~ s(Month) + Year+ Clan, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_syear_clan<- gam(migratory~ (s(Month)+ s(Year))+ Clan, family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_qyear_clan <- gam(migratory~ (s(Month) +(Year+ I(Year)^2))+ Clan, family=binomial,data=kill)
+## Year categorical
+prey_smonth_cyear_clan <- gam(migratory~ (s(Month) + factor(Year))+ Clan, family=binomial,data=kill)
+
+
+
+
+#### Month + Year * clan
+#________________________________________________
+#Year linear
+prey_month_year_iclan <- gam(migratory~ s(Month) + Year* Clan, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_syear_iclan<- gam(migratory~ (s(Month)+ s(Year))* Clan, family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_qyear_iclan <- gam(migratory~ (s(Month) +(Year+ I(Year)^2))* Clan, family=binomial,data=kill)
+## Year categorical
+prey_smonth_cyear_iclan <- gam(migratory~ (s(Month) + factor(Year))* Clan, family=binomial,data=kill)
+
+
+
+####Table of results 
+#________________________________________________
+
+Model_selection_Year_add <- tibble(
+  
+  model= c("sMonth+Year", "sMonth+sYear","sMonth+qYear", "sMonth+cYear" ,
+    "sMonth+Year+Clan", "sMonth+sYear+Clan","sMonth+qYear+Clan", "sMonth+cYear+Clan",
+    "sMonth+Year*Clan", "sMonth+sYear*Clan","sMonth+qYear*Clan", "sMonth+cYear*Clan" ),
+       AIC=c(
+         AIC(prey_month_year), AIC(prey_smonth_syear),AIC(prey_smonth_qyear), AIC(prey_smonth_cyear),
+         AIC(prey_month_year_clan), AIC(prey_smonth_syear_clan),AIC(prey_smonth_qyear_clan), AIC(prey_smonth_cyear_clan) ,
+         AIC(prey_month_year_iclan), AIC(prey_smonth_syear_iclan),AIC(prey_smonth_qyear_iclan), AIC(prey_smonth_cyear_iclan) ),
+       
+              R2 = c(
+                (100-prey_month_year$deviance/prey_month_year$null.deviance * 100),
+              (100-prey_smonth_syear$deviance/prey_smonth_syear$null.deviance * 100),
+               (100-prey_smonth_qyear$deviance/prey_smonth_qyear$null.deviance * 100),
+              (100-prey_smonth_cyear$deviance/prey_smonth_cyear$null.deviance * 100),
+                
+                (100-prey_month_year_clan$deviance/prey_month_year_clan$null.deviance * 100),
+              (100-prey_smonth_syear_clan$deviance/prey_smonth_syear_clan$null.deviance * 100),
+               (100-prey_smonth_qyear_clan$deviance/prey_smonth_qyear_clan$null.deviance * 100),
+              (100-prey_smonth_cyear_clan$deviance/prey_smonth_cyear_clan$null.deviance * 100),
+                
+                (100-prey_month_year_iclan$deviance/prey_month_year_iclan$null.deviance * 100),
+              (100-prey_smonth_syear_iclan$deviance/prey_smonth_syear_iclan$null.deviance * 100),
+               (100-prey_smonth_qyear_iclan$deviance/prey_smonth_qyear_iclan$null.deviance * 100),
+              (100-prey_smonth_cyear_iclan$deviance/prey_smonth_cyear_iclan$null.deviance * 100)))
+
+
+```
+
+### How annual patterns have changed - Interacting effect of Year 
+
+```{r}
+#### Month + Year no clan effect
+#________________________________________________
+#Year linear
+prey_month_iyear <- gam(migratory~ s(Month) * Year, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_isyear<- gam(migratory~ (s(Month)* s(Year)), family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_iqyear <- gam(migratory~ (s(Month) *(Year+ I(Year)^2)), family=binomial,data=kill)
+## Year categorical
+prey_smonth_icyear <- gam(migratory~ (s(Month) * factor(Year)), family=binomial,data=kill)
+
+
+#### Month + Year + clan
+#________________________________________________
+#Year linear
+prey_month_iyear_clan <- gam(migratory~ s(Month) * Year+ Clan, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_isyear_clan<- gam(migratory~ (s(Month)* s(Year))+ Clan, family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_iqyear_clan <- gam(migratory~ (s(Month) *(Year+ I(Year)^2))+ Clan, family=binomial,data=kill)
+## Year categorical
+prey_smonth_icyear_clan <- gam(migratory~ (s(Month) * factor(Year))+ Clan, family=binomial,data=kill)
+
+
+
+#### Month + Year * clan
+#________________________________________________
+#Year linear
+prey_month_iyear_iclan <- gam(migratory~ s(Month) * Year* Clan, family=binomial,data=kill)
+# Year nonlinear
+prey_smonth_isyear_iclan<- gam(migratory~ (s(Month)* s(Year))* Clan, family=binomial,data=kill)
+# Year Quadratic
+prey_smonth_iqyear_iclan <- gam(migratory~ (s(Month) * (Year+ I(Year)^2))* Clan, family=binomial,data=kill)
+## Year categorical
+prey_smonth_icyear_iclan <- gam(migratory~ (s(Month) * factor(Year))* Clan, family=binomial,data=kill)
+
+
+####Table of results 
+#________________________________________________
+
+Model_selection_Year_int <- tibble(
+  
+  model= c("sMonth*Year", "sMonth*sYear","sMonth*qYear", "sMonth*cYear" ,
+    "sMonth*Year+Clan", "sMonth*sYear+Clan","sMonth*qYear+Clan", "sMonth*cYear+Clan" ,
+    "sMonth*Year*Clan", "sMonth*sYear*Clan","sMonth*qYear*Clan", "sMonth+cYear*Clan" ),
+       AIC=c(
+         AIC(prey_month_iyear), AIC(prey_smonth_isyear),AIC(prey_smonth_iqyear), AIC(prey_smonth_icyear),
+         AIC(prey_month_iyear_clan), AIC(prey_smonth_isyear_clan),AIC(prey_smonth_iqyear_clan), AIC(prey_smonth_icyear_clan) ,
+         AIC(prey_month_iyear_iclan), AIC(prey_smonth_isyear_iclan),AIC(prey_smonth_iqyear_iclan), AIC(prey_smonth_icyear_iclan) ),
+       
+              R2 = c(
+                (100-prey_month_iyear$deviance/prey_month_iyear$null.deviance * 100),
+              (100-prey_smonth_isyear$deviance/prey_smonth_isyear$null.deviance * 100),
+               (100-prey_smonth_iqyear$deviance/prey_smonth_iqyear$null.deviance * 100),
+              (100-prey_smonth_icyear$deviance/prey_smonth_icyear$null.deviance * 100),
+                
+                (100-prey_month_iyear_clan$deviance/prey_month_iyear_clan$null.deviance * 100),
+              (100-prey_smonth_isyear_clan$deviance/prey_smonth_isyear_clan$null.deviance * 100),
+               (100-prey_smonth_iqyear_clan$deviance/prey_smonth_iqyear_clan$null.deviance * 100),
+              (100-prey_smonth_icyear_clan$deviance/prey_smonth_icyear_clan$null.deviance * 100),
+                
+                (100-prey_month_iyear_iclan$deviance/prey_month_iyear_iclan$null.deviance * 100),
+              (100-prey_smonth_isyear_iclan$deviance/prey_smonth_isyear_iclan$null.deviance * 100),
+               (100-prey_smonth_iqyear_iclan$deviance/prey_smonth_iqyear_iclan$null.deviance * 100),
+              (100-prey_smonth_icyear_iclan$deviance/prey_smonth_icyear_iclan$null.deviance * 100)))
+
+
+```
+
+
+
+### Effect of Migratory Prey Presence
+
+```{r}
+#### Prey no clan effect
+#________________________________________________
+#Preymax
+prey_preymax <- glm(migratory~ factor(mth_prey_max) , family=binomial,data=kill)
+# Preymode
+prey_preymode<- glm(migratory~ factor(mth_prey_mode), family=binomial,data=kill)
+
+#### Prey clan additive
+#________________________________________________
+# Preymax + Clan
+prey_preymax_clan <- glm(migratory~ factor(mth_prey_max) + Clan, family=binomial,data=kill)
+# Preymode + Clan
+prey_preymode_clan <- glm(migratory~ factor(mth_prey_mode) + Clan, family=binomial,data=kill)
+
+#### Prey clan interacting
+#________________________________________________
+# Preymax * Clan
+prey_preymax_iclan <- glm(migratory~ factor(mth_prey_max) * Clan, family=binomial,data=kill)
+# Preymode * Clan
+prey_preymode_iclan <- glm(migratory~ factor(mth_prey_mode) * Clan, family=binomial,data=kill)
+
+
+## Table of results
+Model_selection_Prey <- tibble(
+  model= c("Preymax", "Preymode",
+           "Preymax+Clan", "Preymode+Clan", 
+           "Preymax*Clan", "Preymode*Clan" ), 
+  
+  AIC=c(AIC(prey_preymax), AIC(prey_preymode),AIC(prey_preymax_clan), AIC(prey_preymode_clan), AIC(prey_preymax_iclan),AIC(prey_preymode_iclan) ) , 
+       
+       R2 = c((100-prey_preymax$deviance/prey_preymax$null.deviance * 100),
+              (100-prey_preymode$deviance/prey_preymode$null.deviance * 100),
+               (100-prey_preymax_clan$deviance/prey_preymax_clan$null.deviance * 100),
+              (100-prey_preymode_clan$deviance/prey_preymode_clan$null.deviance * 100),
+              (100-prey_preymax_iclan$deviance/prey_preymax_iclan$null.deviance * 100),
+              (100-prey_preymode_iclan$deviance/prey_preymode_iclan$null.deviance * 100)))
+
+
+
+```
+
+
+##Final model selection
+
+```{r}
+Final_model_sel <- rbind(Model_selection_Year_int ,Model_selection_Year_add,Model_selection_month, Model_selection_Prey)%>%
+    arrange(AIC)
+
+View(Final_model_sel)
+
+
+write_xlsx(Final_model_sel, path = "Model_selection_prey.xlsx")
+```
+
+##Figures 
